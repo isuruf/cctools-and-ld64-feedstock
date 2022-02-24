@@ -1,0 +1,55 @@
+From 65e59c188e9fb90937e2b124fd7f263c578cb9bb Mon Sep 17 00:00:00 2001
+From: Isuru Fernando <isuruf@gmail.com>
+Date: Wed, 23 Feb 2022 23:48:13 -0800
+Subject: [PATCH] Use a temporary even the output file is not mappable
+
+This is to avoid a weird macOS bug related to signing.
+https://openradar.appspot.com/FB8914243
+---
+ cctools/ld64/src/ld/OutputFile.cpp | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/cctools/ld64/src/ld/OutputFile.cpp b/cctools/ld64/src/ld/OutputFile.cpp
+index c6b4270..f9d2791 100644
+--- a/cctools/ld64/src/ld/OutputFile.cpp
++++ b/cctools/ld64/src/ld/OutputFile.cpp
+@@ -3851,7 +3851,7 @@ void OutputFile::writeOutputFile(ld::Internal& state)
+ 	const char filenameTemplate[] = ".ld_XXXXXX";
+ 	char tmpOutput[PATH_MAX];
+ 	uint8_t *wholeBuffer;
+-	if ( outputIsRegularFile && outputIsMappableFile ) {
++	if ( outputIsRegularFile ) { // ld64-port
+ 		// <rdar://problem/20959031> ld64 should clean up temporary files on SIGINT
+ 		::signal(SIGINT, removePathAndExit);
+ 
+@@ -3876,10 +3876,17 @@ void OutputFile::writeOutputFile(ld::Internal& state)
+ 			else
+ 				throwf("can't grow file for writing '%s', errno=%d", _options.outputFilePath(), err);
+ 		}
+-		
++
++		if ( outputIsMappableFile ) { // ld64-port
+ 		wholeBuffer = (uint8_t *)mmap(NULL, _fileSize, PROT_WRITE|PROT_READ, MAP_SHARED, fd, 0);
+ 		if ( wholeBuffer == MAP_FAILED )
+ 			throwf("can't create buffer of %llu bytes for output", _fileSize);
++		} else {  // ld64-port
++		// try to allocate buffer for entire output file content - ld64-port
++		wholeBuffer = (uint8_t*)calloc(_fileSize, 1);  // ld64-port
++		if ( wholeBuffer == NULL )  // ld64-port
++			throwf("can't create buffer of %llu bytes for output", _fileSize); // ld64-port
++		} // ld64-port
+ 	} 
+ 	else {
+ 		if ( outputIsRegularFile )
+@@ -3914,7 +3921,7 @@ void OutputFile::writeOutputFile(ld::Internal& state)
+ 	if ( _hasCodeSignature )
+ 		_codeSignatureAtom->hash(wholeBuffer);
+ 
+-	if ( outputIsRegularFile && outputIsMappableFile ) {
++	if ( outputIsRegularFile ) {
+ 		::close(fd);
+ 		if ( ::chmod(tmpOutput, permissions) == -1 ) {
+ 			unlink(tmpOutput);
+-- 
+2.30.1
+
